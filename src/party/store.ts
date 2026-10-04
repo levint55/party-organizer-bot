@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { cert, getApps, initializeApp, type ServiceAccount } from 'firebase-admin/app';
+import { getFirestore, type Firestore } from 'firebase-admin/firestore';
+import { requireEnv } from '../config.js';
 import { MAX_MEMBERS_PER_PARTY, MAX_PARTY_COUNT, PARTY_EMOJIS } from './emojis.js';
 
 export interface Party {
@@ -51,6 +55,7 @@ const store: StoreFile = { guilds: {} };
 const tails = new Map<string, Promise<void>>();
 let writeQueue: Promise<void> = Promise.resolve();
 let loaded: Promise<void> | null = null;
+let database: Firestore | null = null;
 
 export function loadParties(): Promise<void> {
   loaded ??= readStore();
@@ -98,7 +103,7 @@ export function addBoard(guildId: string, board: GuildParties): void {
   const guild = store.guilds[guildId] ?? { boards: [] };
   guild.boards.push(board);
   store.guilds[guildId] = guild;
-  persist();
+  persistGuild(guildId);
 }
 
 export function setMember(guildId: string, boardId: string, userId: string, partyId: string): SetMemberResult {
@@ -119,7 +124,7 @@ export function setMember(guildId: string, boardId: string, userId: string, part
   }
 
   guild.members[userId] = { partyId, role: current?.role ?? null };
-  persist();
+  persistGuild(guildId);
   return { ok: true, unchanged: false, previousPartyId: current?.partyId ?? null };
 }
 
@@ -139,7 +144,7 @@ export function setMemberRole(
   }
 
   current.role = role;
-  persist();
+  persistGuild(guildId);
   return { ok: true, unchanged: false };
 }
 
@@ -155,7 +160,7 @@ export function clearMember(guildId: string, boardId: string, userId: string): s
   }
 
   delete guild.members[userId];
-  persist();
+  persistGuild(guildId);
   return current.partyId;
 }
 
@@ -177,6 +182,20 @@ export function withGuildLock<T>(guildId: string, action: () => Promise<T>): Pro
 }
 
 async function readStore(): Promise<void> {
+  const snapshot = await firestore().collection('guilds').get();
+  if (snapshot.empty) {
+    await importLocalParties();
+    return;
+  }
+
+  const guilds: Record<string, GuildRecord> = {};
+  snapshot.forEach((doc) => {
+    guilds[doc.id] = { boards: normalizeBoards(doc.data()) };
+  });
+  store.guilds = guilds;
+}
+
+async function importLocalParties(): Promise<void> {
   try {
     const raw = await readFile(dataFile, 'utf8');
     const parsed: unknown = JSON.parse(raw);
@@ -184,24 +203,45 @@ async function readStore(): Promise<void> {
       return;
     }
     store.guilds = normalizeGuilds(parsed.guilds);
+    for (const guildId of Object.keys(store.guilds)) {
+      await firestore().collection('guilds').doc(guildId).set(store.guilds[guildId] ?? { boards: [] });
+    }
+    console.log(`Imported ${Object.keys(store.guilds).length} server(s) from data/parties.json into Firestore.`);
   } catch (error) {
     const missing = error instanceof Error && 'code' in error && error.code === 'ENOENT';
     if (!missing) {
-      console.error('Failed to read party data. Starting with an empty list.', error);
+      throw error;
     }
   }
 }
 
-function persist(): void {
-  const snapshot = JSON.stringify(store, null, 2);
+function persistGuild(guildId: string): void {
+  const snapshot = structuredClone(store.guilds[guildId]);
+  if (!snapshot) {
+    return;
+  }
   writeQueue = writeQueue
     .then(async () => {
-      await mkdir(dataDir, { recursive: true });
-      await writeFile(dataFile, snapshot);
+      await firestore().collection('guilds').doc(guildId).set(snapshot);
     })
     .catch((error: unknown) => {
-      console.error('Failed to save party data.', error);
+      console.error('Failed to save party data to Firestore.', error);
     });
+}
+
+function firestore(): Firestore {
+  if (database) {
+    return database;
+  }
+
+  const projectId = requireEnv('FIREBASE_PROJECT_ID');
+  const keyPath = requireEnv('FIREBASE_SERVICE_ACCOUNT');
+  const serviceAccount = JSON.parse(readFileSync(keyPath, 'utf8')) as ServiceAccount;
+  if (getApps().length === 0) {
+    initializeApp({ credential: cert(serviceAccount), projectId });
+  }
+  database = getFirestore();
+  return database;
 }
 
 function isStoreFile(value: unknown): value is { guilds: Record<string, unknown> } {

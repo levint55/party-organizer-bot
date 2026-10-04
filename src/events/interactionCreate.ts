@@ -1,9 +1,28 @@
 import { Events, MessageFlags, type InteractionReplyOptions } from 'discord.js';
+import { handlePartyRoleButton } from '../party/roles.js';
 import type { Event } from '../types/event.js';
 
 const event: Event<typeof Events.InteractionCreate> = {
   name: Events.InteractionCreate,
   async execute(interaction) {
+    if (interaction.isButton() && interaction.customId.startsWith('party-role:')) {
+      try {
+        await handlePartyRoleButton(interaction);
+      } catch (error) {
+        console.error(error);
+        const payload = {
+          content: 'There was an error while choosing a role.',
+          flags: MessageFlags.Ephemeral,
+        } satisfies InteractionReplyOptions;
+        if (interaction.replied || interaction.deferred) {
+          await interaction.followUp(payload);
+        } else {
+          await interaction.reply(payload);
+        }
+      }
+      return;
+    }
+
     if (!interaction.isChatInputCommand()) {
       return;
     }

@@ -3,15 +3,16 @@ import {
   AttachmentBuilder,
   ButtonBuilder,
   ButtonStyle,
+  type Client,
   type Guild,
   type Message,
   type PartialMessage,
 } from 'discord.js';
 import { renderPartyGrid, type MemberProfile } from './board-image.js';
-import type { GuildParties, PartyRole } from './store.js';
+import { getBoard, type GuildParties, type PartyRole } from './store.js';
 
 export const BOARD_CAPTION =
-  'Click an emoji to join a party in this team, then choose DPS, Tank, Healer, or Support. Each party holds up to 5 members. Remove the emoji to leave.';
+  'Click an emoji to join a party in this team, then choose DPS, Tank, Healer, or Support. Each party holds up to 5 members. Press Leave, or remove your emoji, to leave.';
 
 export function roleSelectRow(): ActionRowBuilder<ButtonBuilder> {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -19,6 +20,7 @@ export function roleSelectRow(): ActionRowBuilder<ButtonBuilder> {
     new ButtonBuilder().setCustomId('party-role:tank').setLabel('Tank').setEmoji('🛡️').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('party-role:healer').setLabel('Healer').setEmoji('💚').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId('party-role:support').setLabel('Support').setEmoji('✨').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('party-leave').setLabel('Leave').setEmoji('🚪').setStyle(ButtonStyle.Secondary),
   );
 }
 
@@ -28,6 +30,42 @@ export async function createBoardAttachment(
 ): Promise<AttachmentBuilder> {
   const png = await renderPartyGrid(guild, profiles);
   return new AttachmentBuilder(png, { name: `parties-${Date.now()}.png` });
+}
+
+export async function fetchBoardMessage(client: Client, guild: GuildParties): Promise<Message | null> {
+  const located = guild.board;
+  if (!located) {
+    return null;
+  }
+
+  const channel = await client.channels.fetch(located.channelId).catch(() => null);
+  if (!channel || !channel.isTextBased() || channel.isDMBased()) {
+    return null;
+  }
+
+  return channel.messages.fetch(located.messageId).catch(() => null);
+}
+
+const paints = new Map<string, Promise<void>>();
+
+export function queueBoardPaint(guildId: string, boardId: string, message: Message | PartialMessage): Promise<void> {
+  const key = `${guildId}:${boardId}`;
+  const previous = paints.get(key) ?? Promise.resolve();
+  const run = previous.then(async () => {
+    const latest = getBoard(guildId, boardId);
+    if (!latest) {
+      return;
+    }
+    await updateBoardMessage(message, latest);
+  });
+  paints.set(
+    key,
+    run.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  return run;
 }
 
 export async function updateBoardMessage(message: Message | PartialMessage, guild: GuildParties): Promise<void> {

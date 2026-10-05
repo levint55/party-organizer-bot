@@ -1,7 +1,7 @@
 import { MessageFlags, PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
 import { BOARD_CAPTION, createBoardAttachment, roleSelectRow } from '../party/board.js';
 import { MAX_PARTY_COUNT } from '../party/emojis.js';
-import { addBoard, buildGuild, withGuildLock } from '../party/store.js';
+import { addBoard, buildGuild, commitGuildChange, PartySaveError } from '../party/store.js';
 import type { Command } from '../types/command.js';
 
 const command: Command = {
@@ -50,28 +50,44 @@ const command: Command = {
     const partyCount = interaction.options.getInteger('party-count', true);
     const draft = buildGuild(partyCount, teamName);
 
-    await withGuildLock(interaction.guildId, async () => {
-      await interaction.deferReply();
-      const message = await interaction.editReply({
-        content: BOARD_CAPTION,
-        components: [roleSelectRow()],
-        files: [await createBoardAttachment(draft)],
-      });
-      draft.board = { channelId: message.channelId, messageId: message.id };
-      addBoard(interaction.guildId, draft);
-
-      try {
-        for (const party of draft.parties) {
-          await message.react(party.emoji);
-        }
-      } catch (error) {
-        console.error('Failed to add party emojis.', error);
-        await interaction.followUp({
-          content: 'The team was posted, but I could not add every emoji. I need Add Reactions in this channel.',
-          flags: MessageFlags.Ephemeral,
-        });
-      }
+    await interaction.deferReply();
+    const message = await interaction.editReply({
+      content: `**${draft.name}**\n${BOARD_CAPTION}`,
+      components: [roleSelectRow()],
+      files: [await createBoardAttachment(draft)],
     });
+    draft.board = { channelId: message.channelId, messageId: message.id };
+
+    try {
+      await commitGuildChange(interaction.guildId, () => {
+        addBoard(interaction.guildId, draft);
+        return { result: undefined, dirty: true };
+      });
+    } catch (error) {
+      if (!(error instanceof PartySaveError)) {
+        throw error;
+      }
+      console.error('Failed to save a new team.', error);
+      await interaction.editReply({
+        content: 'I could not save this team. Nothing was kept.',
+        components: [],
+        files: [],
+        attachments: [],
+      });
+      return;
+    }
+
+    try {
+      for (const party of draft.parties) {
+        await message.react(party.emoji);
+      }
+    } catch (error) {
+      console.error('Failed to add party emojis.', error);
+      await interaction.followUp({
+        content: 'The team was posted, but I could not add every emoji. I need Add Reactions in this channel.',
+        flags: MessageFlags.Ephemeral,
+      });
+    }
   },
 };
 

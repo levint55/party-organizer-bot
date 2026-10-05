@@ -242,7 +242,7 @@ function roundRect(
 
 async function loadAvatar(url: string): Promise<Image | null> {
   try {
-    const response = await fetch(url);
+    const response = await fetch(url, { signal: AbortSignal.timeout(8_000) });
     if (!response.ok) {
       return null;
     }

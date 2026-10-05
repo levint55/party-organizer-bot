@@ -53,7 +53,6 @@ const dataFile = path.join(dataDir, 'parties.json');
 
 const store: StoreFile = { guilds: {} };
 const tails = new Map<string, Promise<void>>();
-let writeQueue: Promise<void> = Promise.resolve();
 let loaded: Promise<void> | null = null;
 let database: Firestore | null = null;
 
@@ -64,6 +63,14 @@ export function loadParties(): Promise<void> {
 
 export function getBoardByMessage(guildId: string, messageId: string): GuildParties | undefined {
   return store.guilds[guildId]?.boards.find((board) => board.board?.messageId === messageId);
+}
+
+export function listBoards(guildId: string): readonly GuildParties[] {
+  return store.guilds[guildId]?.boards ?? [];
+}
+
+export function getBoard(guildId: string, boardId: string): GuildParties | undefined {
+  return findBoard(guildId, boardId);
 }
 
 export function getMemberPartyId(guildId: string, boardId: string, userId: string): string | null {
@@ -103,7 +110,6 @@ export function addBoard(guildId: string, board: GuildParties): void {
   const guild = store.guilds[guildId] ?? { boards: [] };
   guild.boards.push(board);
   store.guilds[guildId] = guild;
-  persistGuild(guildId);
 }
 
 export function setMember(guildId: string, boardId: string, userId: string, partyId: string): SetMemberResult {
@@ -124,7 +130,6 @@ export function setMember(guildId: string, boardId: string, userId: string, part
   }
 
   guild.members[userId] = { partyId, role: current?.role ?? null };
-  persistGuild(guildId);
   return { ok: true, unchanged: false, previousPartyId: current?.partyId ?? null };
 }
 
@@ -144,7 +149,6 @@ export function setMemberRole(
   }
 
   current.role = role;
-  persistGuild(guildId);
   return { ok: true, unchanged: false };
 }
 
@@ -160,7 +164,6 @@ export function clearMember(guildId: string, boardId: string, userId: string): s
   }
 
   delete guild.members[userId];
-  persistGuild(guildId);
   return current.partyId;
 }
 
@@ -168,9 +171,28 @@ function findBoard(guildId: string, boardId: string): GuildParties | undefined {
   return store.guilds[guildId]?.boards.find((board) => board.id === boardId);
 }
 
-export function withGuildLock<T>(guildId: string, action: () => Promise<T>): Promise<T> {
+export class PartySaveError extends Error {
+  constructor() {
+    super('Failed to save party data.');
+    this.name = 'PartySaveError';
+  }
+}
+
+interface SaveWaiter {
+  rev: number;
+  resolve: () => void;
+  reject: (error: unknown) => void;
+}
+
+const revisions = new Map<string, number>();
+const waiters = new Map<string, SaveWaiter[]>();
+const writing = new Set<string>();
+const lastSaved = new Map<string, GuildRecord>();
+const lastWrittenRev = new Map<string, number>();
+
+export function withGuildLock<T>(guildId: string, action: () => T | Promise<T>): Promise<T> {
   const previous = tails.get(guildId) ?? Promise.resolve();
-  const run = previous.then(action);
+  const run = previous.then(() => action());
   tails.set(
     guildId,
     run.then(
@@ -179,6 +201,22 @@ export function withGuildLock<T>(guildId: string, action: () => Promise<T>): Pro
     ),
   );
   return run;
+}
+
+export async function commitGuildChange<T>(
+  guildId: string,
+  mutate: () => { result: T; dirty: boolean },
+): Promise<T> {
+  let saved = Promise.resolve();
+  const result = await withGuildLock(guildId, () => {
+    const outcome = mutate();
+    if (outcome.dirty) {
+      saved = saveGuild(guildId);
+    }
+    return outcome.result;
+  });
+  await saved;
+  return result;
 }
 
 async function readStore(): Promise<void> {
@@ -193,6 +231,7 @@ async function readStore(): Promise<void> {
     guilds[doc.id] = { boards: normalizeBoards(doc.data()) };
   });
   store.guilds = guilds;
+  rememberSavedGuilds();
 }
 
 async function importLocalParties(): Promise<void> {
@@ -207,6 +246,7 @@ async function importLocalParties(): Promise<void> {
       await firestore().collection('guilds').doc(guildId).set(store.guilds[guildId] ?? { boards: [] });
     }
     console.log(`Imported ${Object.keys(store.guilds).length} server(s) from data/parties.json into Firestore.`);
+    rememberSavedGuilds();
   } catch (error) {
     const missing = error instanceof Error && 'code' in error && error.code === 'ENOENT';
     if (!missing) {
@@ -215,18 +255,113 @@ async function importLocalParties(): Promise<void> {
   }
 }
 
-function persistGuild(guildId: string): void {
-  const snapshot = structuredClone(store.guilds[guildId]);
-  if (!snapshot) {
+function saveGuild(guildId: string): Promise<void> {
+  const rev = (revisions.get(guildId) ?? 0) + 1;
+  revisions.set(guildId, rev);
+  return new Promise((resolve, reject) => {
+    const list = waiters.get(guildId) ?? [];
+    list.push({ rev, resolve, reject });
+    waiters.set(guildId, list);
+    void pumpSaves(guildId);
+  });
+}
+
+async function pumpSaves(guildId: string): Promise<void> {
+  if (writing.has(guildId)) {
     return;
   }
-  writeQueue = writeQueue
-    .then(async () => {
+  writing.add(guildId);
+  try {
+    while ((waiters.get(guildId)?.length ?? 0) > 0) {
+      const captured = await withGuildLock(guildId, () => ({
+        rev: revisions.get(guildId) ?? 0,
+        snapshot: structuredClone(store.guilds[guildId]),
+      }));
+      if (!captured.snapshot) {
+        settleThrough(guildId, captured.rev, new PartySaveError());
+        continue;
+      }
+
+      try {
+        await writeSnapshot(guildId, captured.snapshot);
+        if ((lastWrittenRev.get(guildId) ?? 0) <= captured.rev) {
+          lastSaved.set(guildId, captured.snapshot);
+          lastWrittenRev.set(guildId, captured.rev);
+        }
+        settleThrough(guildId, captured.rev);
+      } catch (error) {
+        console.error('Failed to save party data to Firestore.', error);
+        await withGuildLock(guildId, () => {
+          if ((revisions.get(guildId) ?? 0) !== captured.rev) {
+            return;
+          }
+          const saved = lastSaved.get(guildId);
+          if (saved) {
+            store.guilds[guildId] = structuredClone(saved);
+          } else {
+            delete store.guilds[guildId];
+          }
+          settleThrough(guildId, captured.rev, new PartySaveError());
+        });
+      }
+    }
+  } finally {
+    writing.delete(guildId);
+    if ((waiters.get(guildId)?.length ?? 0) > 0) {
+      void pumpSaves(guildId);
+    }
+  }
+}
+
+async function writeSnapshot(guildId: string, snapshot: GuildRecord): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
       await firestore().collection('guilds').doc(guildId).set(snapshot);
-    })
-    .catch((error: unknown) => {
-      console.error('Failed to save party data to Firestore.', error);
-    });
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 3) {
+        await delay(200 * attempt);
+      }
+    }
+  }
+  throw lastError instanceof Error ? lastError : new PartySaveError();
+}
+
+function settleThrough(guildId: string, rev: number, error?: unknown): void {
+  const list = waiters.get(guildId) ?? [];
+  const keep: SaveWaiter[] = [];
+  for (const waiter of list) {
+    if (waiter.rev <= rev) {
+      if (error) {
+        waiter.reject(error);
+      } else {
+        waiter.resolve();
+      }
+    } else {
+      keep.push(waiter);
+    }
+  }
+  if (keep.length > 0) {
+    waiters.set(guildId, keep);
+  } else {
+    waiters.delete(guildId);
+  }
+}
+
+function rememberSavedGuilds(): void {
+  lastSaved.clear();
+  lastWrittenRev.clear();
+  for (const [guildId, record] of Object.entries(store.guilds)) {
+    lastSaved.set(guildId, structuredClone(record));
+  }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 function firestore(): Firestore {

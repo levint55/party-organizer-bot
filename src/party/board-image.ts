@@ -253,14 +253,17 @@ async function loadAvatar(url: string): Promise<Image | null> {
 }
 
 function registerFont(): string {
-  const fonts = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'Fonts');
-  const bold = path.join(fonts, 'segoeuib.ttf');
-  const regular = path.join(fonts, 'segoeui.ttf');
-  if (existsSync(bold) && GlobalFonts.registerFromPath(bold, 'Party')) {
-    return 'Party';
-  }
-  if (existsSync(regular) && GlobalFonts.registerFromPath(regular, 'Party')) {
-    return 'Party';
+  const windows = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'Fonts');
+  const candidates = [
+    path.join(windows, 'segoeuib.ttf'),
+    path.join(windows, 'segoeui.ttf'),
+    '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+    '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+  ];
+  for (const file of candidates) {
+    if (existsSync(file) && GlobalFonts.registerFromPath(file, 'Party')) {
+      return 'Party';
+    }
   }
   return 'sans-serif';
 }

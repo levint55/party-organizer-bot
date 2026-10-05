@@ -129,6 +129,41 @@ Moving someone keeps their role. Removing them clears it. A full party stays ful
 
 The bot also needs the channel permissions from step 1. A channel overwrite can still block it even after the invite.
 
+## Deploy on Cloudflare
+
+Party joins use Discord’s gateway, and the board image uses a native canvas library. Those need a long-running process, so the bot runs as one [Cloudflare Container](https://developers.cloudflare.com/containers/). A Worker starts that container and pings it every 5 minutes so it stays connected.
+
+You need Docker, a Cloudflare account, and Wrangler logged in:
+
+```bash
+npx wrangler login
+```
+
+Stop the local `npm run dev` process first. Discord allows one connection per bot token.
+
+Store the secrets in Cloudflare. Do not put them in the image or in git.
+
+```bash
+npx wrangler secret put DISCORD_TOKEN
+npx wrangler secret put DISCORD_CLIENT_ID
+npx wrangler secret put FIREBASE_PROJECT_ID
+Get-Content -Raw C:\path\to\service-account.json | npx wrangler secret put FIREBASE_SERVICE_ACCOUNT_JSON
+```
+
+On macOS or Linux, pipe the key with `npx wrangler secret put FIREBASE_SERVICE_ACCOUNT_JSON < service-account.json`.
+
+Then build and publish:
+
+```bash
+npm run cf:deploy
+```
+
+The container uses a 1 GiB instance. Open the Worker URL to wake it. `/health` returns `ok` when the process is listening. `npm run cf:tail` shows logs.
+
+Slash commands are still registered from your machine with `npm run deploy`. The container only runs the bot.
+
+If the board image runs the process out of memory, change `instance_type` in `wrangler.jsonc` from `basic` to `standard-1` and deploy again.
+
 ## Troubleshooting
 
 - **The slash command is missing a new option.** Run `npm run deploy`, then close the command menu and open it again.

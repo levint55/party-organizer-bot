@@ -364,14 +364,27 @@ function delay(ms: number): Promise<void> {
   });
 }
 
+function loadServiceAccount(): ServiceAccount {
+  const inline = process.env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim();
+  if (inline) {
+    try {
+      return JSON.parse(inline) as ServiceAccount;
+    } catch {
+      throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON is not valid JSON.');
+    }
+  }
+
+  const keyPath = requireEnv('FIREBASE_SERVICE_ACCOUNT');
+  return JSON.parse(readFileSync(keyPath, 'utf8')) as ServiceAccount;
+}
+
 function firestore(): Firestore {
   if (database) {
     return database;
   }
 
   const projectId = requireEnv('FIREBASE_PROJECT_ID');
-  const keyPath = requireEnv('FIREBASE_SERVICE_ACCOUNT');
-  const serviceAccount = JSON.parse(readFileSync(keyPath, 'utf8')) as ServiceAccount;
+  const serviceAccount = loadServiceAccount();
   if (getApps().length === 0) {
     initializeApp({ credential: cert(serviceAccount), projectId });
   }

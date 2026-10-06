@@ -1,5 +1,5 @@
 import { MessageFlags, PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
-import { BOARD_CAPTION, createBoardAttachment, roleSelectRow } from '../party/board.js';
+import { boardMessageOptions } from '../party/board.js';
 import { MAX_PARTY_COUNT } from '../party/emojis.js';
 import { addBoard, buildGuild, commitGuildChange, PartySaveError } from '../party/store.js';
 import type { Command } from '../types/command.js';
@@ -51,11 +51,7 @@ const command: Command = {
     const draft = buildGuild(partyCount, teamName);
 
     await interaction.deferReply();
-    const message = await interaction.editReply({
-      content: `**${draft.name}**\n${BOARD_CAPTION}`,
-      components: [roleSelectRow()],
-      files: [await createBoardAttachment(draft)],
-    });
+    const message = await interaction.editReply(boardMessageOptions(draft));
     draft.board = { channelId: message.channelId, messageId: message.id };
 
     try {
@@ -70,22 +66,9 @@ const command: Command = {
       console.error('Failed to save a new team.', error);
       await interaction.editReply({
         content: 'I could not save this team. Nothing was kept.',
+        embeds: [],
         components: [],
-        files: [],
         attachments: [],
-      });
-      return;
-    }
-
-    try {
-      for (const party of draft.parties) {
-        await message.react(party.emoji);
-      }
-    } catch (error) {
-      console.error('Failed to add party emojis.', error);
-      await interaction.followUp({
-        content: 'The team was posted, but I could not add every emoji. I need Add Reactions in this channel.',
-        flags: MessageFlags.Ephemeral,
       });
     }
   },

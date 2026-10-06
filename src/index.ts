@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { createServer } from 'node:http';
-import { Client, GatewayIntentBits, Partials } from 'discord.js';
+import { Client, GatewayIntentBits } from 'discord.js';
 import { requireEnv } from './config.js';
 import { loadCommands } from './handlers/commands.js';
 import { registerEvents } from './handlers/events.js';
@@ -11,8 +11,7 @@ listenForHealthChecks();
 const token = requireEnv('DISCORD_TOKEN');
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessageReactions],
-  partials: [Partials.Message, Partials.Channel, Partials.Reaction, Partials.User],
+  intents: [GatewayIntentBits.Guilds],
 });
 
 await loadParties();

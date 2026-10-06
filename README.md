@@ -1,6 +1,6 @@
 # Party Organizer
 
-A Discord bot that posts a team board. Members join a party by clicking an emoji, then pick a role. The server owner can also place people on the board directly.
+A Discord bot that posts a team board. Members join a party from a menu, then pick a role. The server owner can also place people on the board directly.
 
 A **team** is one board. A team holds up to 20 **parties**, and each party holds up to 5 members. Someone can be in one party per team. Joining a second party on the same board moves them. They can still be on other teams at the same time.
 
@@ -22,14 +22,10 @@ A **team** is one board. A team holds up to 20 **parties**, and each party holds
    - Send Messages
    - Embed Links
    - Read Message History
-   - Add Reactions
-   - Manage Messages
 
-   That set is permission integer `93248`.
+   That set is permission integer `84992`.
 
 7. Invite the bot to your server with that install link.
-
-`Manage Messages` lets the bot take down a member’s old party emoji when they move or when the owner changes the roster.
 
 ## 2. Create Firestore
 
@@ -92,20 +88,20 @@ Someone with **Manage Server** creates a board. The server owner can create one 
 
 `name` is the title on the board. `party-count` is how many parties to create, from 1 to 20. Each new `/team` posts another board and leaves older boards up.
 
-The bot posts an image of the parties and adds one emoji per party. Parties 1–10 use the number emojis. Parties 11–20 use the letter emojis A through J.
+The bot posts a text list of the parties and a menu under it. Parties are named Party 1, Party 2, and so on.
 
 ### Join, move, and leave
 
-1. Click a party’s emoji on the board. Your name appears in the next open slot.
+1. Open **Choose a party** and pick one. Your name appears in the next open slot.
 2. Click **DPS**, **Tank**, **Healer**, or **Support** under the board. You can change that choice later. Each person has one role on that team.
-3. Click a different party emoji to move. Your role stays with you.
-4. Press **Leave**, or remove your emoji, to leave. Your role is cleared.
+3. Pick a different party from the menu to move. Your role stays with you.
+4. Press **Leave** to leave. Your role is cleared.
 
 A party with 5 members rejects another join. You can be in a different party on a different team.
 
 ## Owner commands
 
-Only the server owner can change someone else’s place. The reply is visible only to the owner, and the board image updates for everyone.
+Only the server owner can change someone else’s place. The reply is visible only to the owner, and the board updates for everyone.
 
 | Command | What it does |
 | --- | --- |
@@ -115,7 +111,7 @@ Only the server owner can change someone else’s place. The reply is visible on
 
 Each command asks for the **user** and the **team**. Add and switch also ask for the **party**. Start typing and pick the team and party from the list. If two teams share a name, the list numbers them.
 
-Moving someone keeps their role. Removing them clears it. A full party stays full. Someone placed by the owner can press **Leave** on that board. The Leave button shows up on a board the next time it updates.
+Moving someone keeps their role. Removing them clears it. A full party stays full. Someone placed by the owner can press **Leave** on that board. After you restart the bot, existing boards replace the emoji reactions with the party menu.
 
 `/ping` replies with `Pong!` and is there to check that the bot is responding.
 
@@ -124,14 +120,14 @@ Moving someone keeps their role. Removing them clears it. A full party stays ful
 | Action | Who |
 | --- | --- |
 | Create a team with `/team` | Manage Server |
-| Join, move, leave, and pick a role | Anyone who can see the channel and add reactions |
+| Join, move, leave, and pick a role | Anyone who can see the channel |
 | Add, remove, or move another member | Server owner |
 
 The bot also needs the channel permissions from step 1. A channel overwrite can still block it even after the invite.
 
 ## Deploy on Cloudflare
 
-Party joins use Discord’s gateway, and the board image uses a native canvas library. Those need a long-running process, so the bot runs as one [Cloudflare Container](https://developers.cloudflare.com/containers/). A Worker starts that container and pings it every 5 minutes so it stays connected.
+Party joins use Discord’s gateway, so the bot needs a long-running process. It runs as one [Cloudflare Container](https://developers.cloudflare.com/containers/). A Worker starts that container and pings it every 5 minutes so it stays connected.
 
 You need Docker, a Cloudflare account, and Wrangler logged in:
 
@@ -162,12 +158,9 @@ The container uses a 1 GiB instance. Open the Worker URL to wake it. `/health` r
 
 Slash commands are still registered from your machine with `npm run deploy`. The container only runs the bot.
 
-If the board image runs the process out of memory, change `instance_type` in `wrangler.jsonc` from `basic` to `standard-1` and deploy again.
-
 ## Troubleshooting
 
 - **The slash command is missing a new option.** Run `npm run deploy`, then close the command menu and open it again.
 - **`/member` does nothing or the bot says the command was not found.** Restart `npm run dev` after pulling new code, then run `npm run deploy`.
-- **The board posts, but the emojis are missing.** Allow **Add Reactions** in that channel.
-- **The owner moved someone, but their old emoji stayed.** Allow **Manage Messages** in that channel.
+- **An older board still shows emoji reactions.** Restart `npm run dev`. The bot updates each board and clears those reactions.
 - **Commands take a long time to appear.** Set `DISCORD_GUILD_ID` and deploy again so they register to that server immediately.

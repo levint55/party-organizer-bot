@@ -15,7 +15,6 @@
     "cf:tail": "wrangler tail"
   },
   "dependencies": {
-    "@napi-rs/canvas": "^1.0.10",
     "discord.js": "^14.27.0",
     "dotenv": "^18.0.5",
     "firebase-admin": "^14.5.0"

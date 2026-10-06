@@ -1,6 +1,5 @@
 import { MessageFlags, type ButtonInteraction } from 'discord.js';
 import { queueBoardPaint } from './board.js';
-import { removeMemberPartyReaction } from './reactions.js';
 import {
   clearMember,
   commitGuildChange,
@@ -18,7 +17,7 @@ type RoleUpdate =
 
 type LeaveUpdate =
   | { ok: false; reason: 'stale-board' | 'not-in-party' }
-  | { ok: true; boardId: string; partyId: string; emoji: string | null };
+  | { ok: true; boardId: string };
 
 const ROLE_LABELS: Record<PartyRole, string> = {
   dps: 'DPS',
@@ -62,7 +61,7 @@ export async function handlePartyRoleButton(interaction: ButtonInteraction): Pro
 
     if (!result.ok && result.reason === 'not-in-party') {
       await interaction.followUp({
-        content: 'Join a party first by clicking its emoji, then choose a role.',
+        content: 'Choose a party from the menu first, then pick a role.',
         flags: MessageFlags.Ephemeral,
       });
       return;
@@ -90,7 +89,7 @@ export async function handlePartyRoleButton(interaction: ButtonInteraction): Pro
       } catch (error) {
         console.error('Failed to update the team board.', error);
         await interaction.followUp({
-          content: `You are now ${ROLE_LABELS[role]}. I could not update the board image.`,
+          content: `You are now ${ROLE_LABELS[role]}. I could not update the board.`,
           flags: MessageFlags.Ephemeral,
         });
         return;
@@ -135,8 +134,7 @@ export async function handlePartyLeaveButton(interaction: ButtonInteraction): Pr
         return { result: { ok: false as const, reason: 'not-in-party' as const }, dirty: false };
       }
 
-      const emoji = guild.parties.find((party) => party.id === partyId)?.emoji ?? null;
-      return { result: { ok: true as const, boardId: guild.id, partyId, emoji }, dirty: true };
+      return { result: { ok: true as const, boardId: guild.id }, dirty: true };
     });
 
     if (!result.ok && result.reason === 'stale-board') {
@@ -163,16 +161,8 @@ export async function handlePartyLeaveButton(interaction: ButtonInteraction): Pr
       console.error('Failed to update the team board.', error);
     }
 
-    if (result.emoji) {
-      await removeMemberPartyReaction(interaction.message, result.emoji, interaction.user.id, {
-        guildId,
-        boardId: result.boardId,
-        partyId: result.partyId,
-      });
-    }
-
     await interaction.followUp({
-      content: painted ? 'You left the party.' : 'You left the party. I could not update the board image.',
+      content: painted ? 'You left the party.' : 'You left the party. I could not update the board.',
       flags: MessageFlags.Ephemeral,
     });
   } catch (error) {

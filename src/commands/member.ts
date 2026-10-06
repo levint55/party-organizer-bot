@@ -6,7 +6,6 @@ import {
   type ChatInputCommandInteraction,
 } from 'discord.js';
 import { fetchBoardMessage, queueBoardPaint } from '../party/board.js';
-import { removeMemberPartyReaction } from '../party/reactions.js';
 import {
   clearMember,
   commitGuildChange,
@@ -24,7 +23,6 @@ type MemberAction = 'add' | 'remove' | 'switch';
 interface MemberChange {
   content: string;
   boardId: string | null;
-  clearReaction: { emoji: string; partyId: string } | null;
 }
 
 const command: Command = {
@@ -135,7 +133,7 @@ const command: Command = {
         }
         return planned;
       });
-      await publishMemberChange(interaction, guildId, user.id, change);
+      await publishMemberChange(interaction, guildId, change);
     } catch (error) {
       if (!(error instanceof PartySaveError)) {
         throw error;
@@ -199,7 +197,6 @@ function applyMemberChange(
     result: {
       content,
       boardId: board.id,
-      clearReaction: previous ? { emoji: previous.emoji, partyId: previous.id } : null,
     },
     dirty: true,
   };
@@ -224,20 +221,18 @@ function removeFromTeam(
     result: {
       content,
       boardId: board.id,
-      clearReaction: party ? { emoji: party.emoji, partyId: party.id } : null,
     },
     dirty: true,
   };
 }
 
 function unchangedChange(content: string): MemberChange {
-  return { content, boardId: null, clearReaction: null };
+  return { content, boardId: null };
 }
 
 async function publishMemberChange(
   interaction: ChatInputCommandInteraction,
   guildId: string,
-  userId: string,
   change: MemberChange,
 ): Promise<void> {
   if (!change.boardId) {
@@ -259,17 +254,6 @@ async function publishMemberChange(
   } catch (error) {
     console.error('Failed to update the team board.', error);
     change.content += ' I could not update the team board message.';
-  }
-
-  if (change.clearReaction) {
-    const reaction = await removeMemberPartyReaction(message, change.clearReaction.emoji, userId, {
-      guildId,
-      boardId: board.id,
-      partyId: change.clearReaction.partyId,
-    });
-    if (reaction === 'failed') {
-      change.content += ' I could not remove their old party emoji. I need Manage Messages in that channel.';
-    }
   }
 
   await interaction.editReply({ content: change.content });

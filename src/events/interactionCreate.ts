@@ -1,10 +1,30 @@
 import { Events, MessageFlags, type InteractionReplyOptions } from 'discord.js';
+import { PARTY_SELECT_ID } from '../party/board.js';
 import { handlePartyLeaveButton, handlePartyRoleButton } from '../party/roles.js';
+import { handlePartySelect } from '../party/select.js';
 import type { Event } from '../types/event.js';
 
 const event: Event<typeof Events.InteractionCreate> = {
   name: Events.InteractionCreate,
   async execute(interaction) {
+    if (interaction.isStringSelectMenu() && interaction.customId === PARTY_SELECT_ID) {
+      try {
+        await handlePartySelect(interaction);
+      } catch (error) {
+        console.error(error);
+        const payload = {
+          content: 'There was an error while choosing a party.',
+          flags: MessageFlags.Ephemeral,
+        } satisfies InteractionReplyOptions;
+        if (interaction.replied || interaction.deferred) {
+          await interaction.followUp(payload);
+        } else {
+          await interaction.reply(payload);
+        }
+      }
+      return;
+    }
+
     if (interaction.isButton() && (interaction.customId === 'party-leave' || interaction.customId.startsWith('party-role:'))) {
       try {
         if (interaction.customId === 'party-leave') {

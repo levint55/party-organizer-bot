@@ -1,18 +1,53 @@
 import {
   ActionRowBuilder,
-  AttachmentBuilder,
   ButtonBuilder,
   ButtonStyle,
+  EmbedBuilder,
+  StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder,
   type Client,
-  type Guild,
   type Message,
   type PartialMessage,
 } from 'discord.js';
-import { renderPartyGrid, type MemberProfile } from './board-image.js';
-import { getBoard, type GuildParties, type PartyRole } from './store.js';
+import { getBoard, type GuildParties, type Party, type PartyRole } from './store.js';
+
+export const PARTY_SELECT_ID = 'party-select';
 
 export const BOARD_CAPTION =
-  'Click an emoji to join a party in this team, then choose DPS, Tank, Healer, or Support. Each party holds up to 5 members. Press Leave, or remove your emoji, to leave.';
+  'Choose a party from the menu, then pick DPS, Tank, Healer, or Support. Each party holds up to 5 members. Press Leave to leave.';
+
+export function boardComponents(
+  guild: GuildParties,
+): [ActionRowBuilder<StringSelectMenuBuilder>, ActionRowBuilder<ButtonBuilder>] | [ActionRowBuilder<ButtonBuilder>] {
+  if (guild.parties.length === 0) {
+    return [roleSelectRow()];
+  }
+  return [partySelectRow(guild), roleSelectRow()];
+}
+
+export function partySelectRow(guild: GuildParties): ActionRowBuilder<StringSelectMenuBuilder> {
+  return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(PARTY_SELECT_ID)
+      .setPlaceholder('Choose a party')
+      .addOptions(guild.parties.map((party) => partyOption(guild, party.id, party.name, party.emoji))),
+  );
+}
+
+function partyOption(
+  guild: GuildParties,
+  partyId: string,
+  name: string,
+  emoji: string,
+): StringSelectMenuOptionBuilder {
+  const count = Object.values(guild.members).filter((member) => member.partyId === partyId).length;
+  const description = count >= guild.maxMembers ? 'Full' : `${count}/${guild.maxMembers} members`;
+  return new StringSelectMenuOptionBuilder()
+    .setLabel(name.slice(0, 100))
+    .setValue(partyId)
+    .setEmoji(emoji)
+    .setDescription(description);
+}
 
 export function roleSelectRow(): ActionRowBuilder<ButtonBuilder> {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -24,12 +59,44 @@ export function roleSelectRow(): ActionRowBuilder<ButtonBuilder> {
   );
 }
 
-export async function createBoardAttachment(
-  guild: GuildParties,
-  profiles: ReadonlyMap<string, MemberProfile> = new Map(),
-): Promise<AttachmentBuilder> {
-  const png = await renderPartyGrid(guild, profiles);
-  return new AttachmentBuilder(png, { name: `parties-${Date.now()}.png` });
+const ROLE_TEXT: Record<PartyRole, string> = {
+  dps: '⚔️ DPS',
+  tank: '🛡️ Tank',
+  healer: '💚 Healer',
+  support: '✨ Support',
+};
+
+export function boardMessageOptions(guild: GuildParties) {
+  return {
+    content: '',
+    embeds: [boardEmbed(guild)],
+    components: boardComponents(guild),
+    attachments: [],
+    allowedMentions: { parse: [] },
+  };
+}
+
+export function boardEmbed(guild: GuildParties): EmbedBuilder {
+  return new EmbedBuilder()
+    .setColor(0x3f6b78)
+    .setTitle(guild.name.replace(/\s+/g, ' ').slice(0, 256))
+    .setDescription(BOARD_CAPTION)
+    .addFields(guild.parties.map((party) => partyField(guild, party)));
+}
+
+function partyField(guild: GuildParties, party: Party) {
+  const members = Object.entries(guild.members).filter(([, member]) => member.partyId === party.id);
+  const lines =
+    members.length === 0
+      ? ['*Empty*']
+      : members.map(([userId, member]) => {
+          const role = member.role ? ROLE_TEXT[member.role] : null;
+          return role ? `<@${userId}> · ${role}` : `<@${userId}>`;
+        });
+  return {
+    name: `${party.emoji} ${party.name} · ${members.length}/${guild.maxMembers}`.slice(0, 256),
+    value: lines.join('\n').slice(0, 1024),
+  };
 }
 
 export async function fetchBoardMessage(client: Client, guild: GuildParties): Promise<Message | null> {
@@ -70,68 +137,5 @@ export function queueBoardPaint(guildId: string, boardId: string, message: Messa
 
 export async function updateBoardMessage(message: Message | PartialMessage, guild: GuildParties): Promise<void> {
   const target = message.partial ? await message.fetch() : message;
-  await target.edit(await boardMessageOptions(target, guild));
-}
-
-export async function boardMessageOptions(message: Message | PartialMessage, guild: GuildParties) {
-  const target = message.partial ? await message.fetch() : message;
-  return {
-    content: `**${guild.name}**\n${BOARD_CAPTION}`,
-    components: [roleSelectRow()],
-    embeds: [],
-    files: [await createBoardAttachment(guild, await resolveProfiles(target, guild))],
-    attachments: [],
-  };
-}
-
-async function resolveProfiles(message: Message, guild: GuildParties): Promise<Map<string, MemberProfile>> {
-  const discordGuild = await resolveDiscordGuild(message);
-  const profiles = new Map<string, MemberProfile>();
-  await Promise.all(
-    Object.keys(guild.members).map(async (userId) => {
-      profiles.set(userId, await memberProfile(discordGuild, message, userId, guild.members[userId]?.role ?? null));
-    }),
-  );
-  return profiles;
-}
-
-async function resolveDiscordGuild(message: Message): Promise<Guild | null> {
-  if (message.guild) {
-    return message.guild;
-  }
-  if (!message.guildId) {
-    return null;
-  }
-  return message.client.guilds.fetch(message.guildId).catch(() => null);
-}
-
-async function memberProfile(
-  guild: Guild | null,
-  message: Message,
-  userId: string,
-  role: PartyRole | null,
-): Promise<MemberProfile> {
-  if (guild) {
-    try {
-      const member = await guild.members.fetch(userId);
-      return {
-        name: member.displayName,
-        avatarUrl: member.displayAvatarURL({ extension: 'png', size: 128 }),
-        role,
-      };
-    } catch {
-      // Fall back to the Discord user when the member record is unavailable.
-    }
-  }
-
-  try {
-    const user = await message.client.users.fetch(userId);
-    return {
-      name: user.globalName ?? user.username,
-      avatarUrl: user.displayAvatarURL({ extension: 'png', size: 128 }),
-      role,
-    };
-  } catch {
-    return { name: 'Member', avatarUrl: null, role };
-  }
+  await target.edit(boardMessageOptions(guild));
 }

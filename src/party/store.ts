@@ -29,6 +29,7 @@ export interface PartyMember {
 export interface GuildParties {
   id: string;
   name: string;
+  createdAt: string;
   maxMembers: number;
   parties: Party[];
   members: Record<string, PartyMember>;
@@ -89,6 +90,7 @@ export function buildGuild(partyCount: number, name: string): GuildParties {
   return {
     id: randomUUID(),
     name: teamName,
+    createdAt: new Date().toISOString(),
     maxMembers: MAX_MEMBERS_PER_PARTY,
     parties: Array.from({ length: partyCount }, (_, index) => {
       const emoji = PARTY_EMOJIS[index];
@@ -433,6 +435,7 @@ function normalizeBoard(value: unknown): GuildParties | null {
   return {
     id: typeof guild.id === 'string' ? guild.id : randomUUID(),
     name: typeof guild.name === 'string' && guild.name.trim() ? guild.name.trim() : 'Team',
+    createdAt: typeof guild.createdAt === 'string' ? guild.createdAt : '',
     maxMembers: guild.maxMembers,
     parties: guild.parties,
     members: normalizeMembers(guild.members),

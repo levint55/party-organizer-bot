@@ -308,7 +308,9 @@ function partyChoices(guildId: string, teamValue: string | null, query: string):
 }
 
 function sortedBoards(guildId: string): GuildParties[] {
-  return [...listBoards(guildId)].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+  return [...listBoards(guildId)].sort(
+    (a, b) => b.createdAt.localeCompare(a.createdAt) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id),
+  );
 }
 
 function teamChoiceName(board: GuildParties, boards: readonly GuildParties[]): string {

@@ -1,6 +1,6 @@
 # Party Organizer
 
-A Discord bot that posts a team board. Members join a party from a menu, then pick a role. The server owner can also place people on the board directly.
+A Discord bot that posts a team board. Members join a party from a menu, then pick a role. Someone with Manage Server can also place people on the board directly.
 
 A **team** is one board. A team holds up to 20 **parties**, and each party holds up to 5 members. Someone can be in one party per team. Joining a second party on the same board moves them. They can still be on other teams at the same time.
 
@@ -99,9 +99,9 @@ The bot posts a text list of the parties and a menu under it. Parties are named 
 
 A party with 5 members rejects another join. You can be in a different party on a different team.
 
-## Owner commands
+## Member commands
 
-Only the server owner can change someone else’s place. The reply is visible only to the owner, and the board updates for everyone.
+Someone with **Manage Server** can change someone else’s place. The server owner can too, because the owner has that permission. The reply is visible only to the person who used the command, and the board updates for everyone.
 
 | Command | What it does |
 | --- | --- |
@@ -111,7 +111,7 @@ Only the server owner can change someone else’s place. The reply is visible on
 
 Each command asks for the **user** and the **team**. Add and switch also ask for the **party**. Start typing and pick the team and party from the list. If two teams share a name, the list numbers them.
 
-Moving someone keeps their role. Removing them clears it. A full party stays full. Someone placed by the owner can press **Leave** on that board. After you restart the bot, existing boards replace the emoji reactions with the party menu.
+Moving someone keeps their role. Removing them clears it. A full party stays full. Someone placed with `/member` can press **Leave** on that board. After you restart the bot, existing boards replace the emoji reactions with the party menu.
 
 `/ping` replies with `Pong!` and is there to check that the bot is responding.
 
@@ -121,9 +121,9 @@ Moving someone keeps their role. Removing them clears it. A full party stays ful
 | --- | --- |
 | Create a team with `/team` | Manage Server |
 | Join, move, leave, and pick a role | Anyone who can see the channel |
-| Add, remove, or move another member | Server owner |
+| Add, remove, or move another member | Manage Server |
 
-The bot also needs the channel permissions from step 1. A channel overwrite can still block it even after the invite.
+The bot also needs those permissions inside the channel itself. A private channel only includes the roles you add, so edit that channel, open Permissions, add the bot, and allow View Channel, Send Messages, Embed Links, and Read Message History. If the channel is synced to a category, add the bot on the category. For a private thread, add the bot to the thread.
 
 ## Deploy on Cloudflare
 
@@ -164,3 +164,4 @@ Slash commands are still registered from your machine with `npm run deploy`. The
 - **`/member` does nothing or the bot says the command was not found.** Restart `npm run dev` after pulling new code, then run `npm run deploy`.
 - **An older board still shows emoji reactions.** Restart `npm run dev`. The bot updates each board and clears those reactions.
 - **Commands take a long time to appear.** Set `DISCORD_GUILD_ID` and deploy again so they register to that server immediately.
+- **The bot stays silent in a private channel.** Add the bot under that channel’s Permissions and allow View Channel, Send Messages, Embed Links, and Read Message History. The server invite does not add the bot to private channels.

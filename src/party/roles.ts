@@ -1,4 +1,5 @@
 import { MessageFlags, type ButtonInteraction } from 'discord.js';
+import { replyIfChannelBlocked } from './access.js';
 import { queueBoardPaint } from './board.js';
 import {
   clearMember,
@@ -35,6 +36,10 @@ export async function handlePartyRoleButton(interaction: ButtonInteraction): Pro
   const role = interaction.customId.slice('party-role:'.length);
   if (!isPartyRole(role)) {
     await interaction.reply({ content: 'That role is not available.', flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (await replyIfChannelBlocked(interaction, 'board')) {
     return;
   }
 
@@ -116,6 +121,10 @@ export async function handlePartyRoleButton(interaction: ButtonInteraction): Pro
 export async function handlePartyLeaveButton(interaction: ButtonInteraction): Promise<void> {
   if (!interaction.inGuild()) {
     await interaction.reply({ content: 'Use this in a server.', flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (await replyIfChannelBlocked(interaction, 'board')) {
     return;
   }
 

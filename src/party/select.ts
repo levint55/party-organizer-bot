@@ -1,4 +1,5 @@
 import { MessageFlags, type StringSelectMenuInteraction } from 'discord.js';
+import { replyIfChannelBlocked } from './access.js';
 import { boardComponents, queueBoardPaint } from './board.js';
 import { commitGuildChange, getBoardByMessage, PartySaveError, setMember, type GuildParties } from './store.js';
 
@@ -16,6 +17,10 @@ export async function handlePartySelect(interaction: StringSelectMenuInteraction
   const partyId = interaction.values[0];
   if (!partyId) {
     await interaction.reply({ content: 'Choose a party from the menu.', flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (await replyIfChannelBlocked(interaction, 'board')) {
     return;
   }
 

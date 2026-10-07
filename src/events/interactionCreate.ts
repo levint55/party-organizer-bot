@@ -1,4 +1,5 @@
 import { Events, MessageFlags, type InteractionReplyOptions } from 'discord.js';
+import { channelAccessReply, isChannelAccessError } from '../party/access.js';
 import { PARTY_SELECT_ID } from '../party/board.js';
 import { handlePartyLeaveButton, handlePartyRoleButton } from '../party/roles.js';
 import { handlePartySelect } from '../party/select.js';
@@ -11,16 +12,7 @@ const event: Event<typeof Events.InteractionCreate> = {
       try {
         await handlePartySelect(interaction);
       } catch (error) {
-        console.error(error);
-        const payload = {
-          content: 'There was an error while choosing a party.',
-          flags: MessageFlags.Ephemeral,
-        } satisfies InteractionReplyOptions;
-        if (interaction.replied || interaction.deferred) {
-          await interaction.followUp(payload);
-        } else {
-          await interaction.reply(payload);
-        }
+        await fail(interaction, error, 'There was an error while choosing a party.');
       }
       return;
     }
@@ -33,19 +25,11 @@ const event: Event<typeof Events.InteractionCreate> = {
           await handlePartyRoleButton(interaction);
         }
       } catch (error) {
-        console.error(error);
-        const payload = {
-          content:
-            interaction.customId === 'party-leave'
-              ? 'There was an error while leaving the party.'
-              : 'There was an error while choosing a role.',
-          flags: MessageFlags.Ephemeral,
-        } satisfies InteractionReplyOptions;
-        if (interaction.replied || interaction.deferred) {
-          await interaction.followUp(payload);
-        } else {
-          await interaction.reply(payload);
-        }
+        const fallback =
+          interaction.customId === 'party-leave'
+            ? 'There was an error while leaving the party.'
+            : 'There was an error while choosing a role.';
+        await fail(interaction, error, fallback);
       }
       return;
     }
@@ -77,19 +61,34 @@ const event: Event<typeof Events.InteractionCreate> = {
     try {
       await command.execute(interaction);
     } catch (error) {
-      console.error(error);
-      const payload = {
-        content: 'There was an error while executing this command.',
-        flags: MessageFlags.Ephemeral,
-      } satisfies InteractionReplyOptions;
-
-      if (interaction.replied || interaction.deferred) {
-        await interaction.followUp(payload);
-      } else {
-        await interaction.reply(payload);
-      }
+      await fail(interaction, error, 'There was an error while executing this command.');
     }
   },
 };
 
 export default event;
+
+interface ErrorReply {
+  deferred: boolean;
+  replied: boolean;
+  followUp(options: InteractionReplyOptions): Promise<unknown>;
+  reply(options: InteractionReplyOptions): Promise<unknown>;
+}
+
+async function fail(interaction: ErrorReply, error: unknown, fallback: string): Promise<void> {
+  console.error(error);
+  const payload = {
+    content: isChannelAccessError(error) ? channelAccessReply() : fallback,
+    flags: MessageFlags.Ephemeral,
+  } satisfies InteractionReplyOptions;
+
+  try {
+    if (interaction.replied || interaction.deferred) {
+      await interaction.followUp(payload);
+    } else {
+      await interaction.reply(payload);
+    }
+  } catch (replyError) {
+    console.error('Failed to send an error reply.', replyError);
+  }
+}

@@ -5,6 +5,7 @@ import {
   type AutocompleteInteraction,
   type ChatInputCommandInteraction,
 } from 'discord.js';
+import { replyIfChannelBlocked } from '../party/access.js';
 import { fetchBoardMessage, queueBoardPaint } from '../party/board.js';
 import {
   clearMember,
@@ -28,7 +29,7 @@ interface MemberChange {
 const command: Command = {
   data: new SlashCommandBuilder()
     .setName('member')
-    .setDescription('Add, remove, or move a member on a team. Only the server owner can use this.')
+    .setDescription('Add, remove, or move a member on a team. Requires Manage Server.')
     .setDMPermission(false)
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addSubcommand((subcommand) =>
@@ -65,7 +66,7 @@ const command: Command = {
         ),
     ),
   async autocomplete(interaction) {
-    if (!interaction.inGuild() || !(await isGuildOwner(interaction))) {
+    if (!interaction.inGuild() || !canManageMembers(interaction)) {
       await interaction.respond([]);
       return;
     }
@@ -92,11 +93,15 @@ const command: Command = {
       return;
     }
 
-    if (!(await isGuildOwner(interaction))) {
+    if (!canManageMembers(interaction)) {
       await interaction.reply({
-        content: 'Only the server owner can change party members.',
+        content: 'You need the Manage Server permission to change party members.',
         flags: MessageFlags.Ephemeral,
       });
+      return;
+    }
+
+    if (await replyIfChannelBlocked(interaction, 'message')) {
       return;
     }
 
@@ -352,12 +357,8 @@ function partyLabel(party: Party): string {
   return `${party.emoji} ${party.name}`;
 }
 
-async function isGuildOwner(interaction: ChatInputCommandInteraction | AutocompleteInteraction): Promise<boolean> {
-  if (!interaction.inGuild()) {
-    return false;
-  }
-  const guild = interaction.guild ?? (await interaction.client.guilds.fetch(interaction.guildId).catch(() => null));
-  return guild?.ownerId === interaction.user.id;
+function canManageMembers(interaction: ChatInputCommandInteraction | AutocompleteInteraction): boolean {
+  return interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ?? false;
 }
 
 function isMemberAction(value: string): value is MemberAction {

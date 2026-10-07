@@ -1,4 +1,5 @@
 import { MessageFlags, PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
+import { replyIfChannelBlocked } from '../party/access.js';
 import { boardMessageOptions } from '../party/board.js';
 import { MAX_PARTY_COUNT } from '../party/emojis.js';
 import { addBoard, buildGuild, commitGuildChange, PartySaveError } from '../party/store.js';
@@ -35,6 +36,10 @@ const command: Command = {
         content: 'You need the Manage Server permission to create a team.',
         flags: MessageFlags.Ephemeral,
       });
+      return;
+    }
+
+    if (await replyIfChannelBlocked(interaction, 'board')) {
       return;
     }
 
